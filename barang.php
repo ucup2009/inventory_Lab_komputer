@@ -301,51 +301,87 @@ try {
     </div>
 
     <script>
+        /**
+         * Fungsi untuk membuka jendela Modal (Tambah atau Edit Barang)
+          @param {string} action - Menentukan tindakan ('add' atau 'edit')
+          @param {object} data - Data barang yang akan diedit (null jika tambah baru)
+         */
         function openModal(action, data = null) {
+            // Menampilkan elemen modal dengan menghapus class 'hidden'
             document.getElementById('modal').classList.remove('hidden');
+            
+            // Mengatur nilai input hidden 'formAction' agar PHP tahu apakah ini simpan baru atau update
             document.getElementById('formAction').value = action;
             
+            // Cek apakah aksi yang diinginkan adalah 'edit' dan data barang tersedia
             if (action === 'edit' && data) {
+                // Mengubah teks judul modal menjadi 'Edit Barang'
                 document.getElementById('modalTitle').textContent = 'Edit Barang';
+                
+                // Mengisi setiap kolom input form dengan data barang yang dipilih (untuk diedit)
                 document.getElementById('id_barang').value = data.id_barang;
                 document.getElementById('nama_barang').value = data.nama_barang;
                 document.getElementById('jenis').value = data.jenis;
+                
+                // Mengisi merk, jika data merk kosong diisi dengan string kosong agar tidak muncul 'null'
                 document.getElementById('merk').value = data.merk || '';
                 document.getElementById('kondisi').value = data.kondisi;
                 document.getElementById('jumlah').value = data.jumlah;
+                
+                // Logika PHP: Jika tabel memiliki kolom lab, isi nilai lokasi lab-nya
                 <?php if ($has_lab_column): ?>
                 document.getElementById('lokasi_lab').value = data.lokasi_lab || data.id_lab || '';
                 <?php endif; ?>
             } else {
+                // Jika aksi bukan edit (berarti tambah barang baru)
                 document.getElementById('modalTitle').textContent = 'Tambah Barang';
+                
+                // Mereset semua field input di dalam form agar kosong kembali
                 document.getElementById('barangForm').reset();
+                
+                // Mengosongkan ID barang karena ini adalah data baru yang belum ada di database
                 document.getElementById('id_barang').value = '';
             }
         }
 
+        /**
+         * Fungsi untuk menutup jendela Modal
+         */
         function closeModal() {
+            // Menyembunyikan elemen modal dengan menambahkan kembali class 'hidden'
             document.getElementById('modal').classList.add('hidden');
         }
 
+        /**
+         * Fungsi untuk menghapus data barang
+         * @param {number|string} id - ID Barang yang akan dihapus
+         */
         function deleteBarang(id) {
+            // Menampilkan kotak dialog konfirmasi kepada pengguna
             if (confirm('Apakah Anda yakin ingin menghapus barang ini?')) {
+                // Membuat elemen form secara dinamis (di memori) untuk mengirim data via POST
                 const form = document.createElement('form');
-                form.method = 'POST';
-                form.action = 'actions/barang_action.php';
+                form.method = 'POST'; // Menggunakan metode POST agar lebih aman daripada GET
+                form.action = 'actions/barang_action.php'; // Tujuan pengolahan data di backend
                 
+                // Membuat input tersembunyi untuk memberi tahu aksi 'delete' ke backend
                 const actionInput = document.createElement('input');
                 actionInput.type = 'hidden';
                 actionInput.name = 'action';
                 actionInput.value = 'delete';
-                form.appendChild(actionInput);
+                form.appendChild(actionInput); // Memasukkan input aksi ke dalam form
                 
+                // Membuat input tersembunyi untuk mengirimkan ID barang yang akan dihapus
                 const idInput = document.createElement('input');
                 idInput.type = 'hidden';
                 idInput.name = 'id_barang';
                 idInput.value = id;
-                form.appendChild(idInput);
+                form.appendChild(idInput); // Memasukkan input ID ke dalam form
                 
+                // Memasukkan form bayangan tersebut ke dalam body dokumen agar bisa dieksekusi
                 document.body.appendChild(form);
+                
+                // Mengirimkan form secara otomatis (trigger submit)
                 form.submit();
             }
         }

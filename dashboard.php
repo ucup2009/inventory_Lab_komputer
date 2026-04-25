@@ -201,31 +201,46 @@ try {
     </div>
 
     <script>
-        // Chart Kondisi Barang
+        /**
+         * Inisialisasi Chart untuk Kondisi Barang
+         */
+
+        // 1. Mengambil konteks gambar (canvas) dari HTML dengan ID 'kondisiChart'
+        // .getContext('2d') digunakan agar kita bisa menggambar grafik 2 dimensi
         const ctx = document.getElementById('kondisiChart').getContext('2d');
+
+        // 2. Menyiapkan data kondisi dari PHP ke dalam objek JavaScript
+        // Kita menggunakan tag  echo  agar angka dari database bisa dibaca oleh JS
+        // Operasi '?? 0' memastikan jika data kosong, grafik akan menampilkan angka 0 (tidak error)
         const kondisiData = {
             baik: <?php echo $stats['kondisi']['baik'] ?? 0; ?>,
             rusak: <?php echo $stats['kondisi']['rusak'] ?? 0; ?>,
             perbaikan: <?php echo $stats['kondisi']['perbaikan'] ?? 0; ?>
         };
 
+        // 3. Membuat instance grafik baru menggunakan library Chart.js
         new Chart(ctx, {
-            type: 'doughnut',
+            type: 'doughnut', // Jenis grafik: donat (lingkaran berlubang di tengah)
             data: {
-                labels: ['Baik', 'Rusak', 'Perbaikan'],
+                labels: ['Baik', 'Rusak', 'Perbaikan'], // Nama kategori yang muncul di legenda
                 datasets: [{
+                    // Memasukkan angka statistik ke dalam urutan data grafik
                     data: [kondisiData.baik, kondisiData.rusak, kondisiData.perbaikan],
+                    
+                    // Mengatur warna masing-masing kategori:
+                    // Hijau (#10b981) untuk Baik, Merah (#ef4444) untuk Rusak, Kuning (#f59e0b) untuk Perbaikan
                     backgroundColor: ['#10b981', '#ef4444', '#f59e0b'],
-                    borderWidth: 2,
-                    borderColor: '#fff'
+                    
+                    borderWidth: 2,      // Ketebalan garis pinggir potongan donat
+                    borderColor: '#fff'  // Warna garis pinggir (putih agar terlihat terpisah rapi)
                 }]
             },
             options: {
-                responsive: true,
-                maintainAspectRatio: true,
+                responsive: true,           // Grafik akan otomatis mengecil/membesar mengikuti ukuran layar
+                maintainAspectRatio: true,  // Menjaga perbandingan tinggi dan lebar grafik agar tetap proporsional
                 plugins: {
                     legend: {
-                        position: 'bottom'
+                        position: 'bottom'  // Meletakkan keterangan label (legenda) di bawah grafik
                     }
                 }
             }
