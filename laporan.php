@@ -3,254 +3,118 @@ require_once 'config/database.php';
 require_once 'config/session.php';
 requireAdmin();
 
-$database = new Database();
-$db = $database->getConnection();
+$db = (new Database())->getConnection();
 
-// Check which lab column exists
-$has_lokasi_lab = false;
-$has_id_lab = false;
-try {
-    $stmt = $db->query("SHOW COLUMNS FROM barang LIKE 'lokasi_lab'");
-    $has_lokasi_lab = $stmt->rowCount() > 0;
-    
-    $stmt = $db->query("SHOW COLUMNS FROM barang LIKE 'id_lab'");
-    $has_id_lab = $stmt->rowCount() > 0;
-} catch (Exception $e) {
-    $has_lokasi_lab = false;
-    $has_id_lab = false;
-}
+// Cek keberadaan kolom lab secara ringkas
+$cols = $db->query("SHOW COLUMNS FROM barang")->fetchAll(PDO::FETCH_COLUMN);
+$lab_col = in_array('lokasi_lab', $cols) ? 'lokasi_lab' : (in_array('id_lab', $cols) ? 'id_lab' : null);
 
-$lab_column = $has_lokasi_lab ? 'lokasi_lab' : ($has_id_lab ? 'id_lab' : null);
-$has_lab_column = $has_lokasi_lab || $has_id_lab;
+// Ambil data filter & daftar lab
+$f_lab = $_GET['filter_lab'] ?? '';
+$f_kon = $_GET['filter_kondisi'] ?? '';
+$laboratorium = $db->query("SELECT id_lab, nama_lab FROM laboratorium ORDER BY nama_lab")->fetchAll();
 
-// Get filter parameters
-$filter_lab = $_GET['filter_lab'] ?? '';
-$filter_kondisi = $_GET['filter_kondisi'] ?? '';
-
-// Get laboratorium for filter
-$laboratorium = [];
-try {
-    $stmt = $db->query("SELECT id_lab, nama_lab FROM laboratorium ORDER BY nama_lab");
-    $laboratorium = $stmt->fetchAll();
-} catch (Exception $e) {
-    // Table might not exist
-}
-
-// Build query
-if ($has_lab_column) {
-    $query = "SELECT b.*, l.nama_lab FROM barang b 
-              LEFT JOIN laboratorium l ON b.$lab_column = l.id_lab 
-              WHERE 1=1";
-} else {
-    $query = "SELECT b.*, NULL as nama_lab FROM barang b WHERE 1=1";
-}
+// Bangun query secara dinamis
+$sql = "SELECT b.*, " . ($lab_col ? "l.nama_lab" : "NULL as nama_lab") . " FROM barang b ";
+if ($lab_col) $sql .= "LEFT JOIN laboratorium l ON b.$lab_col = l.id_lab ";
+$sql .= "WHERE 1=1";
 
 $params = [];
+if ($f_lab && $lab_col) { $sql .= " AND b.$lab_col = ?"; $params[] = $f_lab; }
+if ($f_kon) { $sql .= " AND b.kondisi = ?"; $params[] = $f_kon; }
 
-if (!empty($filter_lab) && $has_lab_column) {
-    $query .= " AND b.$lab_column = ?";
-    $params[] = $filter_lab;
-}
+$sql .= $lab_col ? " ORDER BY l.nama_lab, b.nama_barang" : " ORDER BY b.nama_barang";
 
-if (!empty($filter_kondisi)) {
-    $query .= " AND b.kondisi = ?";
-    $params[] = $filter_kondisi;
-}
+// Eksekusi data & hitung statistik
+$stmt = $db->prepare($sql);
+$stmt->execute($params);
+$barang_list = $stmt->fetchAll();
 
-if ($has_lab_column) {
-    $query .= " ORDER BY l.nama_lab, b.nama_barang";
-} else {
-    $query .= " ORDER BY b.nama_barang";
-}
-
-try {
-    $stmt = $db->prepare($query);
-    $stmt->execute($params);
-    $barang_list = $stmt->fetchAll();
-} catch (Exception $e) {
-    // Fallback
-    $query = "SELECT b.*, NULL as nama_lab FROM barang b ORDER BY b.nama_barang";
-    $stmt = $db->prepare($query);
-    $stmt->execute();
-    $barang_list = $stmt->fetchAll();
-}
-
-// Statistics
-$stats = [
-    'total' => count($barang_list),
-    'baik' => 0,
-    'rusak' => 0,
-    'perbaikan' => 0
-];
-
-foreach ($barang_list as $barang) {
-    if (isset($stats[$barang['kondisi']])) {
-        $stats[$barang['kondisi']]++;
-    }
-}
+$stats = ['total' => count($barang_list), 'baik' => 0, 'rusak' => 0, 'perbaikan' => 0];
+foreach ($barang_list as $b) { if (isset($stats[$b['kondisi']])) $stats[$b['kondisi']]++; }
 ?>
 <!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Laporan Inventory - Inventory Lab Komputer</title>
+    <title>Laporan Inventory</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100">
     <?php include 'includes/header.php'; ?>
-    
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div class="max-w-7xl mx-auto px-4 py-8">
         <div class="flex justify-between items-center mb-6">
-            <h2 class="text-3xl font-bold text-gray-800">Laporan Inventory</h2>
+            <h2 class="text-3xl font-bold">Laporan Inventory</h2>
             <div class="space-x-2">
-                <button onclick="window.print()" 
-                    class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-medium transition duration-200">
-                    Cetak
-                </button>
-                <button onclick="exportToExcel()" 
-                    class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition duration-200">
-                    Export Excel
-                </button>
+                <button onclick="window.print()" class="bg-gray-600 text-white px-4 py-2 rounded-lg">Cetak</button>
+                <button onclick="exportToExcel()" class="bg-green-600 text-white px-4 py-2 rounded-lg">Excel</button>
             </div>
         </div>
 
-        <!-- Filter -->
-        <div class="bg-white rounded-lg shadow p-4 mb-6">
-            <form method="GET" action="" class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Filter Laboratorium</label>
-                    <select name="filter_lab" 
-                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
-                        <option value="">Semua Lab</option>
-                        <?php foreach ($laboratorium as $lab): ?>
-                        <option value="<?php echo $lab['id_lab']; ?>" <?php echo $filter_lab == $lab['id_lab'] ? 'selected' : ''; ?>>
-                            <?php echo htmlspecialchars($lab['nama_lab']); ?>
-                        </option>
-                        <?php endforeach; ?>
-                    </select>
+        <form class="bg-white p-4 rounded-lg shadow mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <select name="filter_lab" class="border p-2 rounded">
+                <option value="">Semua Lab</option>
+                <?php foreach ($laboratorium as $l): ?>
+                    <option value="<?= $l['id_lab'] ?>" <?= $f_lab == $l['id_lab'] ? 'selected' : '' ?>><?= htmlspecialchars($l['nama_lab']) ?></option>
+                <?php endforeach; ?>
+            </select>
+            <select name="filter_kondisi" class="border p-2 rounded">
+                <option value="">Semua Kondisi</option>
+                <?php foreach(['baik', 'rusak', 'perbaikan'] as $k): ?>
+                    <option value="<?= $k ?>" <?= $f_kon == $k ? 'selected' : '' ?>><?= ucfirst($k) ?></option>
+                <?php endforeach; ?>
+            </select>
+            <button class="bg-blue-600 text-white rounded">Filter</button>
+        </form>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <?php foreach ($stats as $key => $val): ?>
+                <div class="bg-white p-4 rounded shadow">
+                    <p class="text-sm uppercase"><?= $key ?></p>
+                    <p class="text-2xl font-bold"><?= $val ?></p>
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Filter Kondisi</label>
-                    <select name="filter_kondisi" 
-                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
-                        <option value="">Semua Kondisi</option>
-                        <option value="baik" <?php echo $filter_kondisi === 'baik' ? 'selected' : ''; ?>>Baik</option>
-                        <option value="rusak" <?php echo $filter_kondisi === 'rusak' ? 'selected' : ''; ?>>Rusak</option>
-                        <option value="perbaikan" <?php echo $filter_kondisi === 'perbaikan' ? 'selected' : ''; ?>>Perbaikan</option>
-                    </select>
-                </div>
-                <div class="flex items-end">
-                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium">
-                        Filter
-                    </button>
-                </div>
-            </form>
+            <?php endforeach; ?>
         </div>
 
-        <!-- Statistics -->
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div class="bg-white rounded-lg shadow p-4">
-                <p class="text-sm text-gray-600">Total Barang</p>
-                <p class="text-2xl font-bold text-gray-900"><?php echo $stats['total']; ?></p>
-            </div>
-            <div class="bg-white rounded-lg shadow p-4">
-                <p class="text-sm text-gray-600">Barang Baik</p>
-                <p class="text-2xl font-bold text-green-600"><?php echo $stats['baik']; ?></p>
-            </div>
-            <div class="bg-white rounded-lg shadow p-4">
-                <p class="text-sm text-gray-600">Barang Rusak</p>
-                <p class="text-2xl font-bold text-red-600"><?php echo $stats['rusak']; ?></p>
-            </div>
-            <div class="bg-white rounded-lg shadow p-4">
-                <p class="text-sm text-gray-600">Barang Perbaikan</p>
-                <p class="text-2xl font-bold text-yellow-600"><?php echo $stats['perbaikan']; ?></p>
-            </div>
-        </div>
-
-        <!-- Table -->
-        <div class="bg-white rounded-lg shadow overflow-hidden">
-            <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200" id="reportTable">
-                    <thead class="bg-gray-50">
+        <div class="bg-white rounded-lg shadow overflow-x-auto">
+            <table class="min-w-full" id="reportTable">
+                <thead class="bg-gray-50 text-xs uppercase">
+                    <tr>
+                        <th class="px-6 py-3 text-left">Barang</th><th class="px-6 py-3 text-left">Jenis</th>
+                        <th class="px-6 py-3 text-left">Merk</th><th class="px-6 py-3 text-left">Kondisi</th>
+                        <th class="px-6 py-3 text-left">Jumlah</th><th class="px-6 py-3 text-left">Lab</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y text-sm">
+                    <?php if (empty($barang_list)): ?>
+                        <tr><td colspan="6" class="p-6 text-center">Data kosong</td></tr>
+                    <?php else: foreach ($barang_list as $b): ?>
                         <tr>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama Barang</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Jenis</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Merk</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Kondisi</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Jumlah</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lokasi Lab</th>
-                        </tr>
-                    </thead>
-                    <tbody class="bg-white divide-y divide-gray-200">
-                        <?php if (empty($barang_list)): ?>
-                        <tr>
-                            <td colspan="6" class="px-6 py-4 text-center text-gray-500">Tidak ada data</td>
-                        </tr>
-                        <?php else: ?>
-                        <?php foreach ($barang_list as $barang): ?>
-                        <tr class="hover:bg-gray-50">
-                            <td class="px-6 py-4 whitespace-nowrap">
-                                <div class="text-sm font-medium text-gray-900"><?php echo htmlspecialchars($barang['nama_barang']); ?></div>
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap">
-                                <div class="text-sm text-gray-500"><?php echo htmlspecialchars($barang['jenis']); ?></div>
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap">
-                                <div class="text-sm text-gray-500"><?php echo htmlspecialchars($barang['merk'] ?? '-'); ?></div>
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap">
-                                <span class="px-2 py-1 text-xs font-semibold rounded-full <?php 
-                                    echo $barang['kondisi'] === 'baik' ? 'bg-green-100 text-green-800' : 
-                                        ($barang['kondisi'] === 'rusak' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'); 
-                                ?>">
-                                    <?php echo ucfirst($barang['kondisi']); ?>
+                            <td class="px-6 py-4 font-medium"><?= htmlspecialchars($b['nama_barang']) ?></td>
+                            <td class="px-6 py-4"><?= htmlspecialchars($b['jenis']) ?></td>
+                            <td class="px-6 py-4"><?= htmlspecialchars($b['merk'] ?? '-') ?></td>
+                            <td class="px-6 py-4">
+                                <span class="px-2 py-1 rounded-full text-xs <?= $b['kondisi']=='baik'?'bg-green-100':($b['kondisi']=='rusak'?'bg-red-100':'bg-yellow-100') ?>">
+                                    <?= ucfirst($b['kondisi']) ?>
                                 </span>
                             </td>
-                            <td class="px-6 py-4 whitespace-nowrap">
-                                <div class="text-sm text-gray-900"><?php echo $barang['jumlah']; ?></div>
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap">
-                                <div class="text-sm text-gray-500"><?php echo htmlspecialchars($barang['nama_lab'] ?? '-'); ?></div>
-                            </td>
+                            <td class="px-6 py-4"><?= $b['jumlah'] ?></td>
+                            <td class="px-6 py-4"><?= htmlspecialchars($b['nama_lab'] ?? '-') ?></td>
                         </tr>
-                        <?php endforeach; ?>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
+                    <?php endforeach; endif; ?>
+                </tbody>
+            </table>
         </div>
     </div>
 
     <script>
         function exportToExcel() {
-            const table = document.getElementById('reportTable');
-            let html = table.outerHTML;
-            
-            // Create blob and download
-            const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
-            const url = window.URL.createObjectURL(blob);
+            const blob = new Blob([document.getElementById('reportTable').outerHTML], { type: 'application/vnd.ms-excel' });
             const a = document.createElement('a');
-            a.href = url;
-            a.download = 'laporan_inventory_' + new Date().toISOString().split('T')[0] + '.xls';
+            a.href = window.URL.createObjectURL(blob);
+            a.download = `laporan_${new Date().toISOString().slice(0,10)}.xls`;
             a.click();
-            window.URL.revokeObjectURL(url);
         }
     </script>
-
-    <style media="print">
-        @media print {
-            nav, button, .no-print {
-                display: none !important;
-            }
-            body {
-                background: white;
-            }
-            .bg-gray-100 {
-                background: white;
-            }
-        }
-    </style>
 </body>
 </html>
-
